@@ -2,129 +2,116 @@ import java.io.*;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
 
 public class UTFReader {
-    private static int  signature;
-    private static int  version;
-    private static int  treeOffset;
-    private static int  treeSize;
-    private static int  unusedEntryOffset;
-    private static int  entrySize;
-    private static int  namesOffset;
-    private static int  namesSizeAllocated;
-    private static int  namesSizeUsed;
-    private static int  dataOffset;
-    private static int  unusedOffset;
-    private static int  unusedSize;
-    private static long fileTime;
+    private UTFHeader header;
 
-    public static void main(String[] args) throws IOException {
+    private String dictionary = "";
+    private FileChannel fileChannel;
+
+    public void main(String[] args) throws IOException {
         String path = "/home/tim/freelancer/DATA/AUDIO/walker.utf";
+        path = "/home/tim/freelancer/DATA/SHIPS/LIBERTY/LI_FIGHTER/li_fighter.cmp";
         try (FileChannel ch = FileChannel.open(Paths.get(path), StandardOpenOption.READ)) {
-            populateHeader(ch);
+            fileChannel = ch;
+            populateHeader();
+            int entryCount = header.treeSize / header.entrySize;
             verifyHeader();
             printHeader();
-            readDictionary(ch);
+            readDictionary();
+            Entry root = new Entry(ch, header.treeOffset, header, dictionary);
+            printTree(root, 0);
         }
     }
 
-    private static void populateHeader(FileChannel ch) throws IOException {
-        ByteBuffer buf = ByteBuffer.allocate(8);
-        buf.order(ByteOrder.LITTLE_ENDIAN);
-
-        signature = readInt(buf, ch);
-        version = readInt(buf, ch);
-        treeOffset = readInt(buf, ch);
-        treeSize = readInt(buf, ch);
-        unusedEntryOffset = readInt(buf, ch);
-        entrySize = readInt(buf, ch);
-        namesOffset = readInt(buf, ch);
-        namesSizeAllocated = readInt(buf, ch);
-        namesSizeUsed = readInt(buf, ch);
-        dataOffset = readInt(buf, ch);
-        unusedOffset = readInt(buf, ch);
-        unusedSize = readInt(buf, ch);
-        fileTime = readLong(buf, ch);
+    private void printTree(Entry entry, int depth) {
+        String postfix = "";
+        if (entry.isFile()) {
+            postfix = ": " + header.treeOffset + entry.childOffset + ", " + entry.dataSizeUsed;
+        }
+        System.out.println("-".repeat(depth * 2) + entry.name() + postfix);
+        for (Entry child : entry.children) {
+            printTree(child, depth + 1);
+        }
     }
 
-    private static void getEntries(FileChannel ch) {
 
+    private void populateHeader() throws IOException {
+        ByteBuffer buf = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN);
+        header = new UTFHeader(
+                readInt(buf),
+                readInt(buf),
+                readInt(buf),
+                readInt(buf),
+                readInt(buf),
+                readInt(buf),
+                readInt(buf),
+                readInt(buf),
+                readInt(buf),
+                readInt(buf),
+                readInt(buf),
+                readInt(buf),
+                readLong(buf)
+        );
     }
 
-    private static void printHeader() {
-        System.out.println("signature:\t\t\t\t" + signature + "\n" +
-                "version:\t\t\t\t" + version + "\n" +
-                "treeOffset:\t\t\t\t" + treeOffset + "\n" +
-                "treeSize:\t\t\t\t" + treeSize + "\n" +
-                "unusedEntryOffset:\t\t" + unusedEntryOffset + "\n" +
-                "entrySize:\t\t\t\t" + entrySize + "\n" +
-                "namesOffset:\t\t\t" + namesOffset + "\n" +
-                "namesSizeAllocated:\t\t" + namesSizeAllocated + "\n" +
-                "namesSizeUsed:\t\t\t" + namesSizeUsed + "\n" +
-                "dataOffset:\t\t\t\t" + dataOffset + "\n" +
-                "unusedOffset:\t\t\t" + unusedOffset + "\n" +
-                "unusedSize:\t\t\t\t" + unusedSize + "\n" +
-                "fileTime:\t\t\t\t" + fileTime);
+
+
+    private void printHeader() {
+        System.out.println("signature:\t\t\t\t" + header.signature + "\n" +
+                "version:\t\t\t\t" + header.version + "\n" +
+                "treeOffset:\t\t\t\t" + header.treeOffset + "\n" +
+                "treeSize:\t\t\t\t" + header.treeSize + "\n" +
+                "unusedEntryOffset:\t\t" + header.unusedEntryOffset + "\n" +
+                "entrySize:\t\t\t\t" + header.entrySize + "\n" +
+                "namesOffset:\t\t\t" + header.namesOffset + "\n" +
+                "namesSizeAllocated:\t\t" + header.namesSizeAllocated + "\n" +
+                "namesSizeUsed:\t\t\t" + header.namesSizeUsed + "\n" +
+                "dataOffset:\t\t\t\t" + header.dataOffset + "\n" +
+                "unusedOffset:\t\t\t" + header.unusedOffset + "\n" +
+                "unusedSize:\t\t\t\t" + header.unusedSize + "\n" +
+                "fileTime:\t\t\t\t" + header.fileTime);
     }
 
-    private static void verifyHeader() throws IOException {
-        boolean a = signature == 0x20465455; // == "UTF "
-        boolean b = version == 0x101;
-        boolean c = entrySize == 44;
-        boolean d = namesSizeUsed <= namesSizeAllocated;
+    private void verifyHeader() throws IOException {
+        boolean a = header.signature == 0x20465455; // == "UTF "
+        boolean b = header.version == 0x101;
+        boolean c = header.entrySize == 44;
+        boolean d = header.namesSizeUsed <= header.namesSizeAllocated;
         if (a && b && c && d) {
             return;
         }
         throw new IOException("Invalid header!");
     }
 
-    private static void readDictionary(FileChannel ch) throws IOException {
-        ByteBuffer buf = ByteBuffer.allocate(namesSizeAllocated);
-        buf.limit(namesSizeUsed);
-        ch.position(namesOffset);
-        ch.read(buf);
+    private void readDictionary() throws IOException {
+        ByteBuffer buf = ByteBuffer.allocate(header.namesSizeUsed);
+        fileChannel.position(header.namesOffset);
+        fileChannel.read(buf);
         buf.flip();
 
-        List<String> strings = new ArrayList<String>();
-        strings.add("");
-        int index = 0;
-        for (int i = 0; i < namesSizeUsed-1; i++) {
-            char a = (char) buf.get();
-            if (a == '\0') {
-                strings.add("");
-                index++;
-            } else {
-                strings.set(index, strings.get(index) + a);
-            }
-        }
-
-        for (String a : strings) {
-            System.out.println(a);
+        for (int i = 0; i < header.namesSizeUsed; i++) {
+            dictionary += (char) buf.get();
         }
     }
 
-    private static int readInt(ByteBuffer buf, FileChannel ch) throws IOException{
+    private int readInt(ByteBuffer buf) throws IOException{
         buf.clear();
         buf.limit(4);
-        ch.read(buf);
+        fileChannel.read(buf);
         buf.flip();
 
         return buf.getInt();
     }
 
-    private static long readLong(ByteBuffer buf, FileChannel ch) throws IOException{
+    private long readLong(ByteBuffer buf) throws IOException{
         buf.clear();
         buf.limit(8);
-        ch.read(buf);
+        fileChannel.read(buf);
         buf.flip();
 
         return buf.getLong();
     }
-
 }
