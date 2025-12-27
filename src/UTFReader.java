@@ -2,18 +2,20 @@ import java.io.*;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
+import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
+import java.util.Arrays;
 
 public class UTFReader {
     private UTFHeader header;
-
     private String dictionary = "";
     private FileChannel fileChannel;
 
     public void main(String[] args) throws IOException {
         String path = "/home/tim/freelancer/DATA/AUDIO/walker.utf";
         path = "/home/tim/freelancer/DATA/SHIPS/LIBERTY/LI_FIGHTER/li_fighter.cmp";
+        path = "/home/tim/freelancer/DATA/SHIPS/LIBERTY/li_playerships.mat";
         try (FileChannel ch = FileChannel.open(Paths.get(path), StandardOpenOption.READ)) {
             fileChannel = ch;
             populateHeader();
@@ -22,21 +24,11 @@ public class UTFReader {
             printHeader();
             readDictionary();
             Entry root = new Entry(ch, header.treeOffset, header, dictionary);
-            printTree(root, 0);
+            System.out.println();
+            byte[] dds = root.children.get(1).children.getFirst().children.getFirst().getData();
+            Files.write(Paths.get("/home/tim/freelancer/DATA/SHIPS/LIBERTY/fuck.dds"), dds);
         }
     }
-
-    private void printTree(Entry entry, int depth) {
-        String postfix = "";
-        if (entry.isFile()) {
-            postfix = ": " + header.treeOffset + entry.childOffset + ", " + entry.dataSizeUsed;
-        }
-        System.out.println("-".repeat(depth * 2) + entry.name() + postfix);
-        for (Entry child : entry.children) {
-            printTree(child, depth + 1);
-        }
-    }
-
 
     private void populateHeader() throws IOException {
         ByteBuffer buf = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN);
@@ -80,6 +72,7 @@ public class UTFReader {
         boolean b = header.version == 0x101;
         boolean c = header.entrySize == 44;
         boolean d = header.namesSizeUsed <= header.namesSizeAllocated;
+        boolean e = header.treeSize % header.entrySize == 0;
         if (a && b && c && d) {
             return;
         }

@@ -24,42 +24,44 @@ public class Entry {
     public final long entryOffset;
     private final String dictionary;
 
+    private FileChannel fileChannel;
     public List<Entry> children = new ArrayList<Entry>();
 
     public Entry(FileChannel ch, long offset, UTFHeader header_, String dictionary_) throws IOException {
         entryOffset = offset;
         header = header_;
         dictionary = dictionary_;
-        populateEntry(ch);
-        populateChildren(ch);
+        fileChannel = ch;
+        populateEntry();
+        populateChildren();
     }
 
-    private void populateEntry(FileChannel ch) throws IOException {
-        ch.position(entryOffset);
+    private void populateEntry() throws IOException {
+        fileChannel.position(entryOffset);
         ByteBuffer buf = ByteBuffer.allocate(4);
         buf.order(ByteOrder.LITTLE_ENDIAN);
 
-        nextOffset = readInt(buf, ch);
-        nameOffset = readInt(buf, ch);
-        attributes = readInt(buf, ch);
-        sharingAttributes = readInt(buf, ch);
-        childOffset = readInt(buf, ch);
-        dataSizeAllocated = readInt(buf, ch);
-        dataSizeUsed = readInt(buf, ch);
-        dataSizeUncompressed = readInt(buf, ch);
-        createTime = readInt(buf, ch);
-        accessTime = readInt(buf, ch);
-        modifyTime = readInt(buf, ch);
+        nextOffset = readInt(buf);
+        nameOffset = readInt(buf);
+        attributes = readInt(buf);
+        sharingAttributes = readInt(buf);
+        childOffset = readInt(buf);
+        dataSizeAllocated = readInt(buf);
+        dataSizeUsed = readInt(buf);
+        dataSizeUncompressed = readInt(buf);
+        createTime = readInt(buf);
+        accessTime = readInt(buf);
+        modifyTime = readInt(buf);
     }
 
-    private void populateChildren(FileChannel ch) throws IOException {
+    private void populateChildren() throws IOException {
         if (this.isFile()) {
             return;
         }
-        Entry child = newEntry(ch, header.treeOffset + childOffset);
+        Entry child = newEntry(fileChannel, header.treeOffset + childOffset);
         children.add(child);
         while (child.nextOffset != 0) {
-            child = newEntry(ch, header.treeOffset + child.nextOffset);
+            child = newEntry(fileChannel, header.treeOffset + child.nextOffset);
             children.add(child);
         }
     }
@@ -90,6 +92,21 @@ public class Entry {
         return (attributes & 0x000000FF) == 0x10;
     }
 
+    public void printTree() {
+        printTree(0);
+    }
+
+    private void printTree(int depth) {
+        String postfix = "";
+        if (this.isFile()) {
+            postfix = ": " + header.treeOffset + this.childOffset + ", " + this.dataSizeUsed;
+        }
+        System.out.println("-".repeat(depth * 2) + this.name() + postfix);
+        for (Entry child : this.children) {
+            child.printTree(depth + 1);
+        }
+    }
+
     public String name() {
         StringBuilder sb = new StringBuilder();
         int i = nameOffset;
@@ -100,9 +117,22 @@ public class Entry {
         return sb.toString();
     }
 
-    private static int readInt(ByteBuffer buf, FileChannel ch) throws IOException {
+    public byte[] getData() throws IOException {
+        if (this.isFolder()) {
+            return new byte[0];
+        }
+        fileChannel.position(header.dataOffset + childOffset);
+        ByteBuffer buf = ByteBuffer.allocate(dataSizeUsed);
+        buf.order(ByteOrder.LITTLE_ENDIAN);
+        fileChannel.read(buf);
+        buf.flip();
+
+        return buf.array();
+    }
+
+    private int readInt(ByteBuffer buf) throws IOException {
         buf.clear();
-        int bytesRead = ch.read(buf);
+        int bytesRead = fileChannel.read(buf);
         if (bytesRead != 4) {
             throw new EOFException("Expected 4 bytes, got " + bytesRead);
         }
@@ -110,10 +140,10 @@ public class Entry {
         return buf.getInt();
     }
 
-    private static long readLong(ByteBuffer buf, FileChannel ch) throws IOException {
+    private long readLong(ByteBuffer buf) throws IOException {
         buf.clear();
         buf.limit(8);
-        ch.read(buf);
+        fileChannel.read(buf);
         buf.flip();
 
         return buf.getLong();
