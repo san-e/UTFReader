@@ -23,8 +23,10 @@ public class Entry {
     private final UTFHeader header;
     public final long entryOffset;
     private final String dictionary;
+    public byte[] data;
 
-    private FileChannel fileChannel;
+    private final FileChannel fileChannel;
+    public Entry parent = null;
     public List<Entry> children = new ArrayList<Entry>();
 
     public Entry(FileChannel ch, long offset, UTFHeader header_, String dictionary_) throws IOException {
@@ -34,24 +36,26 @@ public class Entry {
         fileChannel = ch;
         populateEntry();
         populateChildren();
+        data = getData();
     }
 
     private void populateEntry() throws IOException {
         fileChannel.position(entryOffset);
-        ByteBuffer buf = ByteBuffer.allocate(4);
-        buf.order(ByteOrder.LITTLE_ENDIAN);
+        ByteBuffer buf = ByteBuffer.allocate(11*4).order(ByteOrder.LITTLE_ENDIAN);
+        fileChannel.read(buf);
+        buf.flip();
 
-        nextOffset = readInt(buf);
-        nameOffset = readInt(buf);
-        attributes = readInt(buf);
-        sharingAttributes = readInt(buf);
-        childOffset = readInt(buf);
-        dataSizeAllocated = readInt(buf);
-        dataSizeUsed = readInt(buf);
-        dataSizeUncompressed = readInt(buf);
-        createTime = readInt(buf);
-        accessTime = readInt(buf);
-        modifyTime = readInt(buf);
+        nextOffset = buf.getInt();
+        nameOffset = buf.getInt();
+        attributes = buf.getInt();
+        sharingAttributes = buf.getInt();
+        childOffset = buf.getInt();
+        dataSizeAllocated = buf.getInt();
+        dataSizeUsed = buf.getInt();
+        dataSizeUncompressed = buf.getInt();
+        createTime = buf.getInt();
+        accessTime = buf.getInt();
+        modifyTime = buf.getInt();
     }
 
     private void populateChildren() throws IOException {
@@ -59,9 +63,11 @@ public class Entry {
             return;
         }
         Entry child = newEntry(fileChannel, header.treeOffset + childOffset);
+        child.parent = this;
         children.add(child);
         while (child.nextOffset != 0) {
             child = newEntry(fileChannel, header.treeOffset + child.nextOffset);
+            child.parent = this;
             children.add(child);
         }
     }
@@ -92,6 +98,10 @@ public class Entry {
         return (attributes & 0x000000FF) == 0x10;
     }
 
+    public boolean isRootNode() {
+        return parent == null;
+    }
+
     public void printTree() {
         printTree(0);
     }
@@ -110,6 +120,9 @@ public class Entry {
     public String name() {
         StringBuilder sb = new StringBuilder();
         int i = nameOffset;
+        if (nameOffset > header.namesSizeUsed || nameOffset < 0) {
+            return "Out of Bounds dictionary index: " + nameOffset;
+        }
         while (dictionary.charAt(i) != '\0') {
             sb.append(dictionary.charAt(i));
             i++;
@@ -117,7 +130,7 @@ public class Entry {
         return sb.toString();
     }
 
-    public byte[] getData() throws IOException {
+    private byte[] getData() throws IOException {
         if (this.isFolder()) {
             return new byte[0];
         }
@@ -128,24 +141,5 @@ public class Entry {
         buf.flip();
 
         return buf.array();
-    }
-
-    private int readInt(ByteBuffer buf) throws IOException {
-        buf.clear();
-        int bytesRead = fileChannel.read(buf);
-        if (bytesRead != 4) {
-            throw new EOFException("Expected 4 bytes, got " + bytesRead);
-        }
-        buf.flip();
-        return buf.getInt();
-    }
-
-    private long readLong(ByteBuffer buf) throws IOException {
-        buf.clear();
-        buf.limit(8);
-        fileChannel.read(buf);
-        buf.flip();
-
-        return buf.getLong();
     }
 }
