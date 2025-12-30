@@ -1,5 +1,3 @@
-import javax.swing.*;
-import java.io.EOFException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -8,26 +6,27 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class Entry {
-    public int nextOffset;
-    public int nameOffset;
-    public int attributes;
-    public int sharingAttributes;
-    public int childOffset;
-    public int dataSizeAllocated;
-    public int dataSizeUsed;
-    public int dataSizeUncompressed;
-    public int createTime;
-    public int accessTime;
-    public int modifyTime;
+    private int nextOffset;
+    private int nameOffset;
+    private int attributes;
+    private int sharingAttributes;
+    private int childOffset;
+    private int dataSizeAllocated;
+    private int dataSizeUsed;
+    private int dataSizeUncompressed;
+    private int createTime;
+    private int accessTime;
+    private int modifyTime;
 
     private final UTFHeader header;
-    public final long entryOffset;
+    private final long entryOffset;
     private final String dictionary;
-    public byte[] data;
+    private byte[] data;
+    private boolean childrenLoaded = false;
 
     private final FileChannel fileChannel;
-    public Entry parent = null;
-    public List<Entry> children = new ArrayList<Entry>();
+    private Entry parent = null;
+    private List<Entry> children = new ArrayList<Entry>();
 
     public Entry(FileChannel ch, long offset, UTFHeader header_, String dictionary_) throws IOException {
         entryOffset = offset;
@@ -35,8 +34,6 @@ public class Entry {
         dictionary = dictionary_;
         fileChannel = ch;
         populateEntry();
-        populateChildren();
-        data = getData();
     }
 
     private void populateEntry() throws IOException {
@@ -59,9 +56,10 @@ public class Entry {
     }
 
     private void populateChildren() throws IOException {
-        if (this.isFile()) {
+        if (this.isFile() || childrenLoaded) {
             return;
         }
+        childrenLoaded = true;
         Entry child = newEntry(fileChannel, header.treeOffset + childOffset);
         child.parent = this;
         children.add(child);
@@ -102,17 +100,17 @@ public class Entry {
         return parent == null;
     }
 
-    public void printTree() {
+    public void printTree() throws IOException {
         printTree(0);
     }
 
-    private void printTree(int depth) {
+    private void printTree(int depth) throws IOException {
         String postfix = "";
         if (this.isFile()) {
             postfix = ": " + header.treeOffset + this.childOffset + ", " + this.dataSizeUsed;
         }
         System.out.println("-".repeat(depth * 2) + this.name() + postfix);
-        for (Entry child : this.children) {
+        for (Entry child : getChildren()) {
             child.printTree(depth + 1);
         }
     }
@@ -123,16 +121,46 @@ public class Entry {
         if (nameOffset > header.namesSizeUsed || nameOffset < 0) {
             return "Out of Bounds dictionary index: " + nameOffset;
         }
-        while (dictionary.charAt(i) != '\0') {
+        while (i < dictionary.length() && dictionary.charAt(i) != '\0') {
             sb.append(dictionary.charAt(i));
             i++;
         }
         return sb.toString();
     }
 
-    private byte[] getData() throws IOException {
+    public List<Entry> getChildren() throws IOException {
+        if (children.isEmpty() && isFolder()) {
+            populateChildren();
+        }
+        return children;
+    }
+
+    public Entry getParent() {
+        return parent;
+    }
+
+    public byte[] getData() throws IOException {
+        if (data == null) {
+            populateData();
+        }
+        return data;
+    }
+
+    @Override
+    public String toString() {
+        if (isFolder()) {
+            return "[DIR] " + name();
+        }
+        if (isFile()) {
+            return "[FILE] " + name();
+        }
+        return "[ENTRY] " + name();
+    }
+
+    private void populateData() throws IOException {
         if (this.isFolder()) {
-            return new byte[0];
+            data = new byte[0];
+            return;
         }
         fileChannel.position(header.dataOffset + childOffset);
         ByteBuffer buf = ByteBuffer.allocate(dataSizeUsed);
@@ -140,6 +168,6 @@ public class Entry {
         fileChannel.read(buf);
         buf.flip();
 
-        return buf.array();
+        data = buf.array();
     }
 }

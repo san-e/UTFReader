@@ -7,10 +7,10 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 
-public class UTFReader {
+public class UTFReader implements AutoCloseable {
     private UTFHeader header;
     private String dictionary = "";
-    private FileChannel fileChannel;
+    private final FileChannel fileChannel;
     public Entry root;
 
     public static void main(String[] args) throws IOException { // in practice this should be removed, but im experimenting
@@ -19,22 +19,30 @@ public class UTFReader {
         path = "/home/tim/freelancer/DATA/SHIPS/LIBERTY/li_playerships.mat";
 
         UTFReader utf = new UTFReader(path);
-        System.out.println();
-        utf.root.printTree();
-        Entry ddsNode = utf.root.children.get(1).children.getFirst().children.getFirst();
-        byte[] dds = ddsNode.data;
-        Files.write(Paths.get("/home/tim/freelancer/DATA/SHIPS/LIBERTY/" + ddsNode.parent.name() + ".dds"), dds);
+        utf.printTree();
+        utf.close();
+//        Entry ddsNode = utf.root.getChildren().get(1).getChildren().getFirst().getChildren().getFirst();
+//        byte[] dds = ddsNode.getData();
+//        Files.write(Paths.get("/home/tim/freelancer/DATA/SHIPS/LIBERTY/" + ddsNode.getParent().name() + ".dds"), dds);
     }
 
     public UTFReader(String path) throws IOException {
-        try (FileChannel ch = FileChannel.open(Paths.get(path), StandardOpenOption.READ)) {
-            fileChannel = ch;
-            populateHeader();
-            verifyHeader();
-            printHeader();
-            populateDictionary();
-            root = new Entry(ch, header.treeOffset, header, dictionary);
-        }
+        fileChannel = FileChannel.open(Paths.get(path), StandardOpenOption.READ);
+        populateHeader();
+        verifyHeader();
+        printHeader();
+        populateDictionary();
+        root = new Entry(fileChannel, header.treeOffset, header, dictionary);
+
+    }
+
+    public void printTree() throws IOException {
+        root.printTree();
+    }
+
+    @Override
+    public void close() throws IOException {
+        fileChannel.close();
     }
 
     private void populateHeader() throws IOException {
